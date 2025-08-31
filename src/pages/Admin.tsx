@@ -1123,6 +1123,16 @@ const Admin = () => {
                     success/error)
                   </p>
                 </div>
+ <h3 className="text-xl font-semibold flex items-center gap-2">
+                  🧠 Bonus (Advanced / Optional AI)
+                </h3>
+
+                <div className="pl-4 space-y-3">
+                  <p className="text-sm text-gray-600">
+                    If you want to go further: Integrate a chatbot (GPT-style)
+                    for customer help.
+                  </p>
+                </div>
               </div>
             </CardContent>
           </Card>
