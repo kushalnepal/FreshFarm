@@ -3,8 +3,10 @@ import RecommendedProducts from "@/components/cart/RecommendedProducts";
 import { Layout } from "@/components/layout/Layout";
 import { Product } from "@/components/products/ProductCard";
 import { Button } from "@/components/ui/button";
+import type { CartItem } from "@/context/CartContext";
 import { useCart } from "@/context/CartContext";
-import { useCollaborativeFiltering } from "@/hooks/useCollaborativeFiltering";
+// collaborative filtering removed - using simple admin-based recommendations
+import { useRecommendations } from "@/hooks/useCollaborativeFiltering";
 import { api } from "@/lib/api";
 import { CreditCard, Minus, Plus, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -13,8 +15,12 @@ const Cart = () => {
   const { items, removeFromCart, updateQuantity, getCartTotal, clearCart } =
     useCart();
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
-  // Initialize from localStorage synchronously so recommendations can show instantly
+  // By default, do not read or use cached demo/admin products to avoid showing stale defaults.
+  // If you want to enable offline caching behavior, toggle `USE_CACHE_FALLBACK` to true.
+  const USE_CACHE_FALLBACK = false;
+
   const readCachedProducts = (): Product[] => {
+    if (!USE_CACHE_FALLBACK) return [];
     try {
       const saved = localStorage.getItem("farmfresh_products");
       if (!saved) return [];
@@ -27,9 +33,7 @@ const Cart = () => {
             ({
               id: parseInt(p.id),
               name: p.name,
-              image:
-                p.image ||
-                `https://images.unsplash.com/photo-1518977676601-b53f82aba655?w=400`,
+              image: p.image || "/placeholder.svg",
               category: p.category,
               description: p.description,
               price: p.price,
@@ -42,15 +46,11 @@ const Cart = () => {
     }
   };
 
-  const [allProducts, setAllProducts] = useState<Product[]>(() =>
-    readCachedProducts()
-  );
+  const [allProducts, setAllProducts] = useState<Product[]>(() => []);
   // adminProducts contains only products added by admin (from localStorage)
-  const [adminProducts, setAdminProducts] = useState<Product[]>(() =>
-    readCachedProducts()
-  );
+  const [adminProducts, setAdminProducts] = useState<Product[]>(() => []);
 
-  // Load all products for collaborative filtering
+  // Load all admin products for recommendations
   useEffect(() => {
     let mounted = true;
     const loadAdminProducts = async () => {
@@ -66,8 +66,7 @@ const Cart = () => {
               const image =
                 rawImage && !rawImage.startsWith("data:")
                   ? `data:image/png;base64,${rawImage}`
-                  : rawImage ||
-                    `https://images.unsplash.com/photo-1518977676601-b53f82aba655?w=400`;
+                  : rawImage || "/placeholder.svg";
 
               return {
                 id: parseInt(p.id),
@@ -105,9 +104,7 @@ const Cart = () => {
           .map((product: any) => ({
             id: parseInt(product.id),
             name: product.name,
-            image:
-              product.image ||
-              `https://images.unsplash.com/photo-1518977676601-b53f82aba655?w=400`,
+            image: product.image || "/placeholder.svg",
             category: product.category,
             description: product.description,
             price: product.price,
@@ -130,16 +127,53 @@ const Cart = () => {
     };
   }, []);
 
-  // Get collaborative filtering recommendations (may be empty initially)
-  const { recommendations } = useCollaborativeFiltering(items, adminProducts);
+  // Read browsing history (if any) from localStorage - array of product ids user viewed frequently
+  const readBrowsingHistory = (): number[] => {
+    try {
+      const raw = localStorage.getItem("farm_browsing_history");
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      return parsed
+        .map((id: any) => Number(id))
+        .filter((n: number) => !Number.isNaN(n));
+    } catch (_) {
+      return [];
+    }
+  };
 
-  // Only consider recommendations that are admin-provided
-  const adminRecommendations =
-    adminProducts && adminProducts.length > 0
-      ? recommendations.filter((rec) =>
-          adminProducts.some((p) => p.id === rec.id)
-        )
-      : [];
+  const browsingHistory = readBrowsingHistory();
+
+  // Read purchase history from stored orders (do not recommend items already purchased)
+  const readPurchasedProductIds = (): number[] => {
+    try {
+      const raw = localStorage.getItem("farmfresh_orders");
+      if (!raw) return [];
+      const orders = JSON.parse(raw);
+      if (!Array.isArray(orders)) return [];
+      const ids: number[] = [];
+      for (const o of orders) {
+        if (!o.items || !Array.isArray(o.items)) continue;
+        for (const it of o.items) {
+          const nid = Number(it.id);
+          if (!Number.isNaN(nid)) ids.push(nid);
+        }
+      }
+      return Array.from(new Set(ids));
+    } catch (_) {
+      return [];
+    }
+  };
+
+  const purchasedIds = readPurchasedProductIds();
+
+  // Use the recommendation hook (returns 5-10 recs by default)
+  const { recommendations } = useRecommendations(items, allProducts, {
+    browsingHistory,
+    minRecommendations: 5,
+    maxRecommendations: 10,
+    purchasedIds,
+  });
 
   // Helper: Fisher-Yates shuffle
   const shuffle = <T,>(arr: T[]) => {
@@ -151,57 +185,132 @@ const Cart = () => {
     return a;
   };
 
-  // Ensure we display at least 3 recommendations. For new visitors (empty cart), show 3 random admin products.
-  const getDisplayedRecommendations = () => {
-    const MAX = 3;
-    // Start from collaborative results (adminRecommendations)
-    const base = adminRecommendations.slice();
-
-    // If user is new (no items), ignore collaborative results and return 3 random admin products
-    if (items.length === 0) {
-      if (!adminProducts || adminProducts.length === 0) return [];
-      return shuffle(adminProducts).slice(0, MAX);
+  // Format recommendations into the shape expected by RecommendedProducts
+  const formatRecs = () => {
+    const recs = (recommendations || []).slice(0, 10);
+    // dedupe and ensure not recommending items that are purchased (hook already filters),
+    // but allow showing cartQuantity for items in cart
+    const seen = new Set<number>();
+    const formatted: any[] = [];
+    for (const r of recs) {
+      const pid = Number(r.product.id);
+      if (seen.has(pid)) continue;
+      seen.add(pid);
+      const cartItem = items.find((it) => Number(it.id) === pid);
+      formatted.push({
+        product: r.product,
+        reason: r.reason || "Recommended",
+        score: r.score || 0,
+        cartQuantity: cartItem ? cartItem.quantity : 0,
+      });
+      if (formatted.length >= 10) break;
     }
 
-    // For users with items, pad collaborative recommendations with random admin products (excluding cart items)
-    const excluded = new Set(items.map((i) => i.id));
-    const chosen = base.slice();
-    if (chosen.length >= MAX) return chosen.slice(0, MAX);
-
-    const pool = adminProducts.filter(
-      (p) => !excluded.has(p.id) && !chosen.some((c) => c.id === p.id)
-    );
-    const shuffled = shuffle(pool);
-    for (const p of shuffled) {
-      if (chosen.length >= MAX) break;
-      chosen.push(p);
+    // If still too few recommendations, pad with random admin products (exclude cart & purchased)
+    if (formatted.length < 5) {
+      const excluded = new Set(items.map((i) => Number(i.id)));
+      purchasedIds.forEach((id) => excluded.add(Number(id)));
+      const pool = adminProducts.filter((p) => !excluded.has(Number(p.id)));
+      for (const p of pool) {
+        const pid = Number(p.id);
+        if (seen.has(pid)) continue;
+        formatted.push({
+          product: p,
+          reason: "Popular",
+          score: 0,
+          cartQuantity: 0,
+        });
+        seen.add(pid);
+        if (formatted.length >= 5) break;
+      }
     }
-    return chosen.slice(0, MAX);
+
+    return formatted;
   };
 
-  const displayedRecommendations = getDisplayedRecommendations();
-
-  // If no admin-based recommendations, fall back to 3 random products from allProducts
-  const fallbackRecommendations = (() => {
-    const MAX = 3;
-    if (displayedRecommendations && displayedRecommendations.length > 0)
-      return displayedRecommendations;
-    if (!allProducts || allProducts.length === 0) return [] as Product[];
-    // exclude cart items
-    const excluded = new Set(items.map((i) => i.id));
-    const pool = allProducts.filter((p) => !excluded.has(p.id));
-    // shuffle pool
+  const displayedRecommendations = formatRecs();
+  // If nothing computed but admin products exist, show 3 random admin products
+  if (
+    (!displayedRecommendations || displayedRecommendations.length === 0) &&
+    adminProducts &&
+    adminProducts.length > 0
+  ) {
+    const pool = adminProducts.filter(
+      (p) =>
+        !items.some((i) => Number(i.id) === Number(p.id)) &&
+        !purchasedIds.includes(Number(p.id))
+    );
     const a = pool.slice();
     for (let i = a.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [a[i], a[j]] = [a[j], a[i]];
     }
-    return a.slice(0, MAX);
-  })();
+    const fallback = a
+      .slice(0, 3)
+      .map((p) => ({
+        product: p,
+        reason: "Popular",
+        score: 0,
+        cartQuantity: 0,
+      }));
+    // override displayedRecommendations with fallback
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    // (we reassign the variable for rendering)
+    // @ts-ignore
+    displayedRecommendations.splice(
+      0,
+      displayedRecommendations.length,
+      ...fallback
+    );
+  }
 
   // Calculate cart total
   const cartTotal = getCartTotal();
   const hasItems = items.length > 0;
+
+  // Inline recommendations component (shows 1-2 related products under each cart item)
+  const InlineRecommendations = ({ item }: { item: CartItem }) => {
+    // Simple inline recommendations: pick admin products from same category not in cart
+    const recs = adminProducts
+      .filter((p) => p.category === item.category && p.id !== item.id)
+      .slice(0, 2);
+    const { addToCart } = useCart();
+
+    if (!recs || recs.length === 0) return null;
+
+    // Show at most 2 inline recommendations
+    const shown = recs.slice(0, 2);
+
+    return (
+      <div className="mt-4 p-3 bg-gray-50 rounded-md">
+        <div className="text-sm font-medium mb-2">You may also like</div>
+        <div className="flex gap-3">
+          {shown.map((p) => (
+            <div
+              key={p.id}
+              className="flex items-center gap-3 p-2 bg-white border rounded-md w-1/2"
+            >
+              <img
+                src={p.image}
+                alt={p.name}
+                className="w-12 h-12 object-cover rounded"
+              />
+              <div className="flex-1">
+                <div className="text-sm font-medium line-clamp-1">{p.name}</div>
+                <div className="text-xs text-gray-600">NPR {p.price}</div>
+              </div>
+              <button
+                onClick={() => addToCart(p, 1)}
+                className="px-2 py-1 text-xs bg-farm-green-dark text-white rounded"
+              >
+                Add
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <Layout>
@@ -285,6 +394,8 @@ const Cart = () => {
                           </Button>
                         </div>
                       </div>
+                      {/* Inline recommendations for this cart item */}
+                      <InlineRecommendations item={item} />
                     </div>
                   ))}
                 </div>
@@ -338,7 +449,7 @@ const Cart = () => {
                   <ul className="text-xs text-gray-600 space-y-1">
                     <li>✓ Greedy algorithm for value efficiency</li>
                     <li>✓ Hash map deduplication (O(1) lookups)</li>
-                    <li>✓ Collaborative filtering recommendations</li>
+                    <li>✓ Product recommendations (admin-based)</li>
                   </ul>
                 </div>
               </div>
@@ -358,18 +469,11 @@ const Cart = () => {
       </section>
 
       {/* Recommended Products - always shown just below the shopping cart */}
-      {(displayedRecommendations && displayedRecommendations.length > 0) ||
-      (fallbackRecommendations && fallbackRecommendations.length > 0) ? (
+      {displayedRecommendations && displayedRecommendations.length > 0 ? (
         <section className="container-custom py-6">
           <div className="bg-white rounded-lg shadow-md p-6">
             <h3 className="text-lg font-semibold mb-4">Recommended for you</h3>
-            <RecommendedProducts
-              products={
-                displayedRecommendations && displayedRecommendations.length > 0
-                  ? displayedRecommendations
-                  : fallbackRecommendations
-              }
-            />
+            <RecommendedProducts products={displayedRecommendations} />
           </div>
         </section>
       ) : null}

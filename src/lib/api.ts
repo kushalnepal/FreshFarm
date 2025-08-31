@@ -1,4 +1,21 @@
-const API_BASE_URL = "https://ecommerce-backend.kushalnepal.com.np/api";
+// Prefer explicit Vite env var for API base URL so you can switch environments easily.
+// If VITE_API_BASE_URL is not provided, use a sensible default:
+// - in development use the local backend (http://localhost:5006/api)
+// - in production use the hosted backend URL
+const _metaEnv = (import.meta as any).env || {};
+const API_BASE_URL =
+  _metaEnv.VITE_API_BASE_URL ||
+  (_metaEnv.DEV
+    ? "http://localhost:5006/api"
+    : "https://ecommerce-backend.kushalnepal.com.np/api");
+
+// Helpful debug: show which base URL the client will use at runtime
+try {
+  // eslint-disable-next-line no-console
+  console.debug("API_BASE_URL:", API_BASE_URL);
+} catch (e) {
+  /* ignore in environments without console */
+}
 
 interface User {
   id: string;
@@ -21,9 +38,19 @@ interface Product {
 }
 
 class ApiError extends Error {
-  constructor(public status: number, message: string) {
+  public errorCode?: number | null;
+  public errors?: any;
+
+  constructor(
+    public status: number,
+    message: string,
+    errorCode?: number | null,
+    errors?: any
+  ) {
     super(message);
     this.name = "ApiError";
+    this.errorCode = errorCode ?? null;
+    this.errors = errors;
   }
 }
 
@@ -55,8 +82,39 @@ class ApiClient {
       });
 
       if (!response.ok) {
+        const contentType = response.headers.get("content-type") || "";
+
+        if (contentType.includes("application/json")) {
+          // Try to parse structured error returned by backend
+          const json = await response.json().catch(() => null);
+          const msg =
+            json?.message ||
+            JSON.stringify(json) ||
+            response.statusText ||
+            "Request failed";
+          // If the token is invalid/expired, clear stored auth so UI can redirect to login
+          if (response.status === 401) {
+            try {
+              localStorage.removeItem("authToken");
+              localStorage.removeItem("userData");
+            } catch (e) {
+              /* ignore */
+            }
+          }
+
+          throw new ApiError(
+            response.status,
+            msg,
+            json?.errorCode ?? null,
+            json?.errors ?? null
+          );
+        }
+
         const errorText = await response.text();
-        throw new ApiError(response.status, errorText || "Request failed");
+        throw new ApiError(
+          response.status,
+          errorText || response.statusText || "Request failed"
+        );
       }
 
       const contentType = response.headers.get("content-type") || "";
@@ -240,6 +298,8 @@ class ApiClient {
   async getAdminProductById(id: string): Promise<Product> {
     return this.request(`/products/${id}`);
   }
+
+  // Recommendation endpoint removed — collaborative filtering disabled
 
   async updateAdminProduct(
     id: string,

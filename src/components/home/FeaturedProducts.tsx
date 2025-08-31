@@ -10,7 +10,7 @@ const fallbackFeatured: CardProduct[] = [
   {
     id: 2,
     name: "Free-Range Chicken",
-    image: "https://images.unsplash.com/photo-1518492104633-130d0cc84637?w=400",
+    image: "/placeholder.svg",
     category: "Chicken",
     description: "Naturally raised free-range chicken without antibiotics.",
     price: 550,
@@ -18,7 +18,7 @@ const fallbackFeatured: CardProduct[] = [
   {
     id: 3,
     name: "Premium Cattle Grass",
-    image: "https://images.unsplash.com/photo-1500382017468-9049fed747ef?w=400",
+    image: "/placeholder.svg",
     category: "Grass",
     description: "High-quality grass feed for healthy cattle growth.",
     price: 180,
@@ -142,15 +142,11 @@ const FeaturedProducts = () => {
               >
                 <div className="h-56 overflow-hidden">
                   <img
-                    src={
-                      product.image ||
-                      "https://via.placeholder.com/400x300?text=No+Image"
-                    }
+                    src={product.image || "/placeholder.svg"}
                     alt={product.name}
                     className="w-full h-full object-cover hover:scale-105 transition-transform duration-500"
                     onError={(e) => {
-                      e.currentTarget.src =
-                        "https://via.placeholder.com/400x300?text=No+Image";
+                      e.currentTarget.src = "/placeholder.svg";
                     }}
                   />
                 </div>

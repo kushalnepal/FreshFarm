@@ -1,33 +1,33 @@
-
-import { Link } from "react-router-dom";
 import { ArrowRight } from "lucide-react";
+import { Link } from "react-router-dom";
 
 const Hero = () => {
   return (
     <section className="relative bg-farm-cream overflow-hidden">
-      <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1523741543316-beb7fc7023d8?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D&auto=format&fit=crop&w=1374&q=80')] bg-cover bg-center opacity-20"></div>
+      <div className="absolute inset-0 bg-farm-cream opacity-40"></div>
 
       <div className="container-custom relative min-h-[80vh] flex flex-col justify-center py-16 md:py-24 lg:min-h-[70vh]">
         <div className="max-w-2xl">
           <span className="inline-block bg-farm-green-light/20 text-farm-green-dark rounded-full px-4 py-1.5 font-medium text-sm mb-4">
             100% Organic Products
           </span>
-          
+
           <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold mb-6 leading-tight">
             Fresh Farm Products <br />
             <span className="text-farm-green-dark">Delivered to Your Door</span>
           </h1>
-          
+
           <p className="text-lg md:text-xl text-gray-700 mb-8 max-w-xl">
-            Experience the taste of fresh vegetables, free-range chicken, and quality farm products sourced directly from our organic farm.
+            Experience the taste of fresh vegetables, free-range chicken, and
+            quality farm products sourced directly from our organic farm.
           </p>
-          
+
           <div className="flex flex-col sm:flex-row gap-4">
             <Link to="/products" className="btn-primary">
               Browse Products
               <ArrowRight size={18} />
             </Link>
-            
+
             <Link to="/order-now" className="btn-outline">
               Place an Order
             </Link>

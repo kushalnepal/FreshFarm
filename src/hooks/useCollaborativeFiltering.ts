@@ -1,193 +1,236 @@
 import { Product } from "@/components/products/ProductCard";
 import { CartItem } from "@/context/CartContext";
-import { useMemo } from "react";
+import { api } from "@/lib/api";
+import { useEffect, useMemo, useState } from "react";
 
-interface UserPurchaseHistory {
-  userId: string;
-  items: number[]; // product IDs
-}
+type UserHistory = { userId: string; items: number[] };
 
-// Simulated user purchase history data
-const mockPurchaseHistory: UserPurchaseHistory[] = [
-  { userId: "user1", items: [1, 2] }, // Vegetables + Chicken
-  { userId: "user2", items: [1, 3] }, // Vegetables + Grass
-  { userId: "user3", items: [2, 3] }, // Chicken + Grass
-  { userId: "user4", items: [1, 2, 3] }, // All three
-  { userId: "user5", items: [1, 2] }, // Vegetables + Chicken
-  { userId: "user6", items: [2, 3] }, // Chicken + Grass
+// Small simulated history for association rules
+const mockPurchaseHistory: UserHistory[] = [
+  { userId: "user1", items: [1, 2] },
+  { userId: "user2", items: [1, 3] },
+  { userId: "user3", items: [2, 3] },
+  { userId: "user4", items: [1, 2, 3] },
+  { userId: "user5", items: [1, 2] },
+  { userId: "user6", items: [2, 3] },
 ];
 
-export const useCollaborativeFiltering = (
+export type Recommendation = {
+  product: Product;
+  reason: string; // "bought together" | "same tag" | "browsing history" | "same category"
+  score: number;
+};
+
+export const useRecommendations = (
   cartItems: CartItem[],
-  allProducts: Product[]
+  allProducts: Product[],
+  options?: {
+    browsingHistory?: number[];
+    minRecommendations?: number;
+    maxRecommendations?: number;
+    // list of product ids the user has already purchased (should not be recommended)
+    purchasedIds?: number[];
+  }
 ) => {
-  const recommendations = useMemo(() => {
-    const MAX_RECOMMENDATIONS = 3;
+  const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-    // Helper: Fisher-Yates shuffle
-    const shuffle = <T>(arr: T[]) => {
-      const a = arr.slice();
-      for (let i = a.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [a[i], a[j]] = [a[j], a[i]];
-      }
-      return a;
+  // local compute (previous logic) as fallback
+  const localCompute = useMemo(() => {
+    // reuse majority of prior logic but return sync array
+    const MIN = options?.minRecommendations ?? 5;
+    const MAX = options?.maxRecommendations ?? 10;
+
+    const normalizeTags = (p: Product) => {
+      if (!p.tags) return [] as string[];
+      if (Array.isArray(p.tags))
+        return p.tags.map((t) => String(t).toLowerCase());
+      return String(p.tags)
+        .split(/[,|;]/)
+        .map((t) => t.trim().toLowerCase())
+        .filter(Boolean);
     };
 
-    // Helper: read cached admin products from localStorage (sync fallback)
-    const readCachedAdminProducts = (): Product[] => {
-      try {
-        const saved = localStorage.getItem("farmfresh_products");
-        if (!saved) return [];
-        const parsed = JSON.parse(saved);
-        if (!Array.isArray(parsed)) return [];
-        return parsed
-          .filter((p: any) => p.inStock)
-          .map(
-            (p: any) =>
-              ({
-                id: parseInt(p.id),
-                name: p.name,
-                image:
-                  p.image ||
-                  `https://images.unsplash.com/photo-1518977676601-b53f82aba655?w=400`,
-                category: p.category,
-                description: p.description,
-                price: p.price,
-                onSale: p.onSale || false,
-                salePrice: p.salePrice,
-              } as Product)
+    const productById = new Map<number, Product>();
+    allProducts.forEach((p) => productById.set(Number(p.id), p));
+    const cartIds = new Set(cartItems.map((i) => Number(i.id)));
+    const purchasedIds = new Set(
+      (options?.purchasedIds || []).map((n) => Number(n))
+    );
+    const recs: Recommendation[] = [];
+    const seen = new Set<number>();
+    const push = (id: number, reason: string, score = 0) => {
+      const pid = Number(id);
+      if (cartIds.has(pid) || seen.has(pid) || purchasedIds.has(pid)) return;
+      const prod = productById.get(pid);
+      if (!prod) return;
+      seen.add(pid);
+      recs.push({ product: prod, reason, score });
+    };
+
+    if (cartItems && cartItems.length > 0) {
+      const freq = new Map<number, number>();
+      for (const h of mockPurchaseHistory) {
+        if (h.items.some((id) => cartIds.has(id))) {
+          for (const id of h.items) {
+            if (!cartIds.has(id)) freq.set(id, (freq.get(id) || 0) + 1);
+          }
+        }
+      }
+      Array.from(freq.entries())
+        .sort(([, a], [, b]) => b - a)
+        .forEach(([id, count]) => push(id, "bought together", count));
+
+      const browsing = options?.browsingHistory ?? [];
+      if (browsing.length > 0) {
+        const btags = new Set<string>();
+        for (const bid of browsing) {
+          const bp = productById.get(Number(bid));
+          if (!bp) continue;
+          normalizeTags(bp).forEach((t) => btags.add(t));
+        }
+        if (btags.size > 0) {
+          for (const p of allProducts) {
+            const pid = Number(p.id);
+            if (cartIds.has(pid) || seen.has(pid)) continue;
+            const shared = normalizeTags(p).filter((t) => btags.has(t)).length;
+            if (shared > 0) push(pid, "browsing history", shared);
+          }
+        }
+      }
+
+      if (recs.length < MIN) {
+        const cartCategories = new Set(cartItems.map((i) => i.category));
+        for (const p of allProducts) {
+          const pid = Number(p.id);
+          if (cartIds.has(pid) || seen.has(pid)) continue;
+          if (cartCategories.has(p.category)) push(pid, "same category", 1);
+          if (recs.length >= MAX) break;
+        }
+      }
+    } else {
+      const seed = options?.browsingHistory ?? [];
+      const seedTags = new Set<string>();
+      if (seed.length > 0) {
+        for (const sid of seed) {
+          const sp = productById.get(Number(sid));
+          if (!sp) continue;
+          normalizeTags(sp).forEach((t) => seedTags.add(t));
+        }
+      }
+
+      if (seedTags.size === 0) {
+        const tagFreq = new Map<string, number>();
+        for (const p of allProducts)
+          normalizeTags(p).forEach((t) =>
+            tagFreq.set(t, (tagFreq.get(t) || 0) + 1)
           );
-      } catch (_) {
-        return [];
+        Array.from(tagFreq.entries())
+          .sort(([, a], [, b]) => b - a)
+          .slice(0, 3)
+          .forEach(([t]) => seedTags.add(t));
       }
-    };
 
-    // If cart is empty (new customer), show random admin-added products
-    if (cartItems.length === 0) {
-      const source =
-        allProducts && allProducts.length > 0
-          ? allProducts
-          : readCachedAdminProducts();
-      if (!source || source.length === 0) return [];
-      return shuffle(source).slice(0, MAX_RECOMMENDATIONS);
+      const tagsArr = Array.from(seedTags);
+      for (const tag of tagsArr) {
+        const candidates = allProducts.filter(
+          (p) =>
+            normalizeTags(p).includes(tag) &&
+            !cartIds.has(Number(p.id)) &&
+            !seen.has(Number(p.id))
+        );
+        for (let i = candidates.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
+        }
+        candidates
+          .slice(0, 2)
+          .forEach((p) => push(Number(p.id), "same tag", 1));
+        if (recs.length >= MAX) break;
+      }
     }
 
-    console.log("Generating collaborative filtering recommendations...");
-
-    // Get current cart product IDs
-    const cartProductIds = cartItems.map((item) => item.id);
-    console.log("Cart product IDs:", cartProductIds);
-
-    // Only recommend products that are present in `allProducts` (admin-added)
-    const adminProductIds = new Set(allProducts.map((p) => p.id));
-
-    // Find users who bought similar items that are also admin products
-    const similarUsers = mockPurchaseHistory.filter((history) =>
-      history.items.some(
-        (productId) =>
-          cartProductIds.includes(productId) && adminProductIds.has(productId)
-      )
-    );
-
-    console.log("Similar users found:", similarUsers.length);
-
-    // Count frequency of products bought by similar users
-    const productFrequency = new Map<number, number>();
-
-    similarUsers.forEach((user) => {
-      user.items.forEach((productId) => {
-        // Only count products that are admin-added and not already in cart
-        if (
-          !cartProductIds.includes(productId) &&
-          adminProductIds.has(productId)
-        ) {
-          productFrequency.set(
-            productId,
-            (productFrequency.get(productId) || 0) + 1
-          );
-        }
-      });
+    const reasonPriority: Record<string, number> = {
+      "bought together": 4,
+      "browsing history": 3,
+      "same tag": 2,
+      "same category": 1,
+    };
+    recs.sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      const pa = reasonPriority[a.reason] ?? 0;
+      const pb = reasonPriority[b.reason] ?? 0;
+      if (pb !== pa) return pb - pa;
+      return a.product.name.localeCompare(b.product.name);
     });
 
-    console.log(
-      "Product frequency map:",
-      Array.from(productFrequency.entries())
-    );
+    return recs.slice(0, Math.max(MIN, Math.min(MAX, recs.length)));
+  }, [cartItems, allProducts, options]);
 
-    // Sort by frequency (collaborative filtering - most co-purchased first)
-    const sortedRecommendations = Array.from(productFrequency.entries())
-      .sort(([, freqA], [, freqB]) => freqB - freqA)
-      .slice(0, 3); // Top 3 recommendations
+  useEffect(() => {
+    let mounted = true;
+    const fetchRecommendations = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        // Try server recommendations only if API client exposes method
+        let usedServer = false;
+        if (typeof (api as any).getRecommendations === "function") {
+          try {
+            const payload = {
+              cart: cartItems.map((i) => Number(i.id)),
+              browsingHistory: options?.browsingHistory || [],
+              purchased: options?.purchasedIds || [],
+            };
+            const res = await (api as any)
+              .getRecommendations(payload)
+              .catch(() => null);
+            if (res && Array.isArray(res)) {
+              const mapped: Recommendation[] = res
+                .map((r: any) => {
+                  const prod = allProducts.find(
+                    (p) => Number(p.id) === Number(r.id)
+                  );
+                  if (!prod) return null;
+                  // server may return reason/score
+                  return {
+                    product: prod,
+                    reason: r.reason || "server",
+                    score: Number(r.score) || 0,
+                  } as Recommendation;
+                })
+                .filter(Boolean) as Recommendation[];
 
-    // Map back to product objects
-    const recommendedProducts = sortedRecommendations
-      .map(([productId]) => allProducts.find((p) => p.id === productId))
-      .filter(Boolean) as Product[];
+              if (mapped.length > 0) {
+                setRecommendations(
+                  mapped.slice(0, options?.maxRecommendations ?? 10)
+                );
+                setLoading(false);
+                usedServer = true;
+              }
+            }
+          } catch (_) {
+            // ignore server errors and fallback to local compute
+          }
+        }
 
-    console.log(
-      "Final recommendations:",
-      recommendedProducts.map((p) => p.name)
-    );
-
-    // If we have fewer than desired recommendations, try category-based, then random fill
-    const finalRecommendations: Product[] = [];
-
-    // Start with collaborative filtering results
-    recommendedProducts.forEach((p) => finalRecommendations.push(p));
-
-    // Helper: get candidates excluding cart items and already recommended
-    const excludedIds = new Set<number>([
-      ...cartProductIds,
-      ...finalRecommendations.map((p) => p.id),
-    ]);
-    const candidates = allProducts.filter((p) => !excludedIds.has(p.id));
-
-    // 1) Fill from same categories as cart items (preserve order)
-    if (finalRecommendations.length < MAX_RECOMMENDATIONS) {
-      const cartCategories = new Set(cartItems.map((i) => i.category));
-      const categoryCandidates = candidates.filter((p) =>
-        cartCategories.has(p.category)
-      );
-      for (const c of categoryCandidates) {
-        if (finalRecommendations.length >= MAX_RECOMMENDATIONS) break;
-        finalRecommendations.push(c);
-        excludedIds.add(c.id);
+        if (!usedServer) {
+          setRecommendations(localCompute);
+        }
+      } catch (err: any) {
+        setError(err?.message || "Failed to fetch recommendations");
+        setRecommendations(localCompute);
+      } finally {
+        setLoading(false);
       }
-    }
+    };
 
-    // 2) If still not enough, add random products from remaining candidates
-    if (finalRecommendations.length < MAX_RECOMMENDATIONS) {
-      const remaining = allProducts.filter((p) => !excludedIds.has(p.id));
-      // Shuffle in-place (Fisher-Yates)
-      for (let i = remaining.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [remaining[i], remaining[j]] = [remaining[j], remaining[i]];
-      }
-      for (const r of remaining) {
-        if (finalRecommendations.length >= MAX_RECOMMENDATIONS) break;
-        finalRecommendations.push(r);
-      }
-    }
+    fetchRecommendations();
+    return () => {
+      mounted = false;
+    };
+  }, [cartItems, allProducts, options, localCompute]);
 
-    // Limit to MAX_RECOMMENDATIONS and return
-    // Ensure recommendations are admin-provided products and deduplicated
-    const adminIds = new Set(allProducts.map((p) => p.id));
-    const deduped: Product[] = [];
-    const seen = new Set<number>();
-    for (const p of finalRecommendations) {
-      if (!adminIds.has(p.id)) continue; // skip non-admin products
-      if (seen.has(p.id)) continue;
-      seen.add(p.id);
-      deduped.push(p);
-      if (deduped.length >= MAX_RECOMMENDATIONS) break;
-    }
-
-    return deduped.slice(0, MAX_RECOMMENDATIONS);
-  }, [cartItems, allProducts]);
-
-  return {
-    recommendations,
-    hasRecommendations: recommendations.length > 0,
-  };
+  return { recommendations, loading, error };
 };

@@ -9,53 +9,10 @@ import { toast } from "sonner";
 
 // Product name to image mapping for proper image assignment
 const getProductImage = (productName: string) => {
-  const imageMap: { [key: string]: string } = {
-    "Organic Tomatoes":
-      "https://images.unsplash.com/photo-1607305387299-a3d9611cd469?w=400",
-    "Bell Peppers":
-      "https://images.unsplash.com/photo-1563565375-f3fdfdbefa83?w=400",
-    "Fresh Radish":
-      "https://images.unsplash.com/photo-1588781292665-c3db922633b1?w=400",
-    "Free-Range Chicken":
-      "https://images.unsplash.com/photo-1548550023-2bdb3c5beed7?w=400",
-    "Premium Cattle Grass":
-      "https://images.unsplash.com/photo-1500382017468-9049fed747ef?w=400",
-    "Fresh Carrots":
-      "https://images.unsplash.com/photo-1445282768818-728615cc910a?w=400",
-    "Organic Potatoes":
-      "https://images.unsplash.com/photo-1502741126161-b048400d72f2?w=400",
-    "Green Spinach":
-      "https://images.unsplash.com/photo-1576045057995-568f588f82fb?w=400",
-    "Farm Fresh Eggs":
-      "https://images.unsplash.com/photo-1518492104633-130d0cc84637?w=400",
-    "Organic Broccoli":
-      "https://images.unsplash.com/photo-1459411621453-7b03977f4bfc?w=400",
-    "Sweet Corn":
-      "https://images.unsplash.com/photo-1551754655-cd27e38d2076?w=400",
-    "Fresh Cucumbers":
-      "https://images.unsplash.com/photo-1567306301408-9b74779a11af?w=400",
-    "Red Onions":
-      "https://images.unsplash.com/photo-1518373714866-3f1478910cc0?w=400",
-    "Green Lettuce":
-      "https://images.unsplash.com/photo-1622206151226-18ca2c9ab4a1?w=400",
-    "Fresh Cabbage":
-      "https://images.unsplash.com/photo-1594282486552-05b4d80fbb9f?w=400",
-    "Garden Peas":
-      "https://images.unsplash.com/photo-1587735243615-c03f25aaff15?w=400",
-    "Fresh Cauliflower":
-      "https://images.unsplash.com/photo-1510627489930-0c1b0e63aa14?w=400",
-    "Organic Beetroot":
-      "https://images.unsplash.com/photo-1515543904379-3d0e229be1f7?w=400",
-    "Fresh Ginger":
-      "https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=400",
-    "Green Beans":
-      "https://images.unsplash.com/photo-1506617420156-8e4536971650?w=400",
-  };
+  const placeholder = "/placeholder.svg";
+  const imageMap: { [key: string]: string } = {};
 
-  return (
-    imageMap[productName] ||
-    "https://images.unsplash.com/photo-1540420773420-3366772f4999?w=400"
-  );
+  return imageMap[productName] || placeholder;
 };
 
 const Products = () => {
@@ -101,38 +58,8 @@ const Products = () => {
         toast.error("Failed to load products");
       }
 
-      // Fallback to default products if API fails
-      const defaultProducts: Product[] = [
-        {
-          id: 1,
-          name: "Organic Tomatoes",
-          image:
-            "https://images.unsplash.com/photo-1518977676601-b53f82aba655?w=400",
-          category: "Vegetables",
-          description: "Fresh organic red tomatoes from our farm.",
-          price: 150,
-        },
-        {
-          id: 2,
-          name: "Free-Range Chicken",
-          image:
-            "https://images.unsplash.com/photo-1518492104633-130d0cc84637?w=400",
-          category: "Chicken",
-          description:
-            "Naturally raised free-range chicken without antibiotics.",
-          price: 550,
-        },
-        {
-          id: 3,
-          name: "Premium Cattle Grass",
-          image:
-            "https://images.unsplash.com/photo-1500382017468-9049fed747ef?w=400",
-          category: "Grass",
-          description: "High-quality grass feed for healthy cattle growth.",
-          price: 180,
-        },
-      ];
-      setProductsList(defaultProducts);
+      // Do not show demo products by default when API fails — clear the list
+      setProductsList([]);
     } finally {
       setLoading(false);
     }

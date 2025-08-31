@@ -3,58 +3,35 @@ import { Button } from "@/components/ui/button";
 import { useCart } from "@/context/CartContext";
 import { Plus, ShoppingCart } from "lucide-react";
 
+type RecItem = {
+  product: Product;
+  reason?: string;
+  score?: number;
+  cartQuantity?: number;
+};
+
 interface RecommendedProductsProps {
-  products: Product[];
+  products: RecItem[] | Product[];
 }
 
 const RecommendedProducts = ({ products }: RecommendedProductsProps) => {
   const { addToCart } = useCart();
 
-  if (products.length === 0) {
-    return null;
-  }
+  if (!products || products.length === 0) return null;
 
-  // Name -> image mapping fallback to ensure correct images for recommendations
-  const imageFallback: Record<string, string> = {
-    "Organic Tomatoes":
-      "https://images.unsplash.com/photo-1518977676601-b53f82aba655?w=400",
-    "Organic Potatoes":
-      "https://images.unsplash.com/photo-1502741126161-b048400d72f2?w=400",
-  };
-
-  const defaultImage =
-    "https://images.unsplash.com/photo-1540420773420-3366772f4999?w=400";
-
-  const findFallbackByName = (productName: string) => {
-    const lower = productName.toLowerCase();
-    // try exact key match first
-    if (imageFallback[productName]) return imageFallback[productName];
-    // then try case-insensitive exact
-    const exactKey = Object.keys(imageFallback).find(
-      (k) => k.toLowerCase() === lower
-    );
-    if (exactKey) return imageFallback[exactKey];
-    // then try partial match (e.g. product name contains mapping key or vice-versa)
-    const partialKey = Object.keys(imageFallback).find(
-      (k) => lower.includes(k.toLowerCase()) || k.toLowerCase().includes(lower)
-    );
-    if (partialKey) return imageFallback[partialKey];
-    return undefined;
-  };
+  // Use a local placeholder for products that don't have an explicit image.
+  // Avoid any external Unsplash defaults.
+  const placeholder = "/placeholder.svg";
 
   const getImageSrc = (product: Product) => {
     const img = product.image?.toString().trim();
-    // if product.image looks like a valid URL, use it
-    if (img) {
-      if (/^https?:\/\//i.test(img)) return img;
-      // if it's a relative path, return as-is (browser will resolve)
-      if (img.startsWith("/")) return img;
-      // otherwise still try to use it (onError will fallback)
-      return img;
-    }
-    // fallback to mapping or default
-    const byName = findFallbackByName(product.name || "");
-    return byName || defaultImage;
+    if (!img) return placeholder;
+    // allow absolute URLs (http/https) or app-relative paths
+    if (/^https?:\/\//i.test(img)) return img;
+    if (img.startsWith("/")) return img;
+    // otherwise treat as a relative path or filename and let the browser resolve it;
+    // if it fails, onError will set the placeholder.
+    return img;
   };
 
   return (
@@ -63,51 +40,73 @@ const RecommendedProducts = ({ products }: RecommendedProductsProps) => {
         <ShoppingCart className="text-farm-green-dark" size={20} />
         <h3 className="text-lg font-semibold">Customers also bought</h3>
       </div>
-      <p className="text-sm text-gray-600 mb-4">
-        Based on collaborative filtering from similar purchases
-      </p>
+      <p className="text-sm text-gray-600 mb-4">Personalized recommendations</p>
 
       <div className="space-y-4">
-        {products.map((product) => (
-          <div
-            key={product.id}
-            className="flex items-center gap-4 p-3 border rounded-lg hover:bg-gray-50"
-          >
-            <div className="w-16 h-16 flex-shrink-0">
-              <img
-                src={getImageSrc(product)}
-                alt={product.name}
-                onError={(e) => {
-                  const fallback =
-                    findFallbackByName(product.name) || defaultImage;
-                  if (e.currentTarget.src !== fallback)
-                    e.currentTarget.src = fallback;
-                }}
-                className="w-full h-full object-cover rounded-md"
-              />
-            </div>
+        {products.map((item) => {
+          const product: Product = (item as any).product
+            ? (item as any).product
+            : (item as Product);
+          const reason: string | undefined = (item as any).reason;
+          const cartQuantity: number = (item as any).cartQuantity ?? 0;
 
-            <div className="flex-grow">
-              <h4 className="font-medium text-sm mb-1">{product.name}</h4>
-              <p className="text-xs text-gray-600 line-clamp-2">
-                {product.description}
-              </p>
-              <span className="text-farm-green-dark font-semibold text-sm">
-                NPR {product.price}
-              </span>
-            </div>
+          const tags = Array.isArray(product.tags)
+            ? product.tags
+            : product.tags
+            ? String(product.tags)
+                .split(/[,|;]/)
+                .map((t) => t.trim())
+            : [];
 
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => addToCart(product, 1)}
-              className="flex-shrink-0"
+          return (
+            <div
+              key={product.id}
+              className="flex items-center gap-4 p-3 border rounded-lg hover:bg-gray-50"
             >
-              <Plus size={16} className="mr-1" />
-              Add
-            </Button>
-          </div>
-        ))}
+              <div className="w-16 h-16 flex-shrink-0">
+                <img
+                  src={getImageSrc(product)}
+                  alt={product.name}
+                  onError={(e) => {
+                    const fallback = placeholder;
+                    if (e.currentTarget.src !== fallback)
+                      e.currentTarget.src = fallback;
+                  }}
+                  className="w-full h-full object-cover rounded-md"
+                />
+              </div>
+
+              <div className="flex-grow">
+                <h4 className="font-medium text-sm mb-1">{product.name}</h4>
+                <div className="text-xs text-gray-600 line-clamp-2">
+                  {product.description}
+                </div>
+                <div className="text-xs text-gray-500 mt-1">
+                  {tags.join(", ")}
+                </div>
+                <div className="text-farm-green-dark font-semibold text-sm mt-1">
+                  NPR {product.price}
+                </div>
+                {reason && (
+                  <div className="text-xs text-gray-500 mt-1">{reason}</div>
+                )}
+                <div className="text-xs text-gray-500 mt-1">
+                  In cart: {cartQuantity}
+                </div>
+              </div>
+
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => addToCart(product, 1)}
+                className="flex-shrink-0"
+              >
+                <Plus size={16} className="mr-1" />
+                Add
+              </Button>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

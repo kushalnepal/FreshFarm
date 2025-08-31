@@ -1,7 +1,6 @@
-
-import { Link } from "react-router-dom";
-import { ShoppingCart } from "lucide-react";
 import { useCart } from "@/context/CartContext";
+import { ShoppingCart } from "lucide-react";
+import { Link } from "react-router-dom";
 
 export interface Product {
   id: number;
@@ -10,6 +9,11 @@ export interface Product {
   category: string;
   description: string;
   price: number;
+  // Optional logistics data used for delivery packing (kg, cubic centimeters)
+  weightKg?: number;
+  volumeCm3?: number;
+  // Optional tags (backend may provide tags as array or comma-separated string)
+  tags?: string[] | string;
   onSale?: boolean;
   salePrice?: number;
 }
@@ -26,11 +30,17 @@ const ProductCard = ({ product }: ProductCardProps) => {
     addToCart(product, 1);
   };
 
-  const displayPrice = product.onSale && product.salePrice ? product.salePrice : product.price;
+  const displayPrice =
+    product.onSale && product.salePrice ? product.salePrice : product.price;
   const originalPrice = product.price;
 
   // Fallback image if no image is provided
-  const productImage = product.image || 'https://images.unsplash.com/photo-1540420773420-3366772f4999?w=400';
+  const defaultImage = "/placeholder.svg";
+
+  const productImage =
+    product.image && String(product.image).trim()
+      ? String(product.image).trim()
+      : defaultImage;
 
   return (
     <div className="bg-white border border-gray-100 rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-shadow relative">
@@ -42,7 +52,7 @@ const ProductCard = ({ product }: ProductCardProps) => {
           </span>
         </div>
       )}
-      
+
       <div className="h-52 overflow-hidden">
         <img
           src={productImage}
@@ -50,21 +60,17 @@ const ProductCard = ({ product }: ProductCardProps) => {
           className="w-full h-full object-cover hover:scale-105 transition-transform duration-500"
           onError={(e) => {
             // Fallback to default image if the product image fails to load
-            e.currentTarget.src = 'https://images.unsplash.com/photo-1540420773420-3366772f4999?w=400';
+            if (e.currentTarget.src !== defaultImage)
+              e.currentTarget.src = defaultImage;
           }}
         />
       </div>
-      
+
       <div className="p-5">
-        <div className="flex justify-between items-start mb-2">
-          <h3 className="text-lg font-semibold">{product.name}</h3>
-          <span className="inline-block bg-farm-cream text-farm-brown-dark rounded-full px-3 py-1 text-xs font-medium">
-            {product.category}
-          </span>
-        </div>
-        
-        <p className="text-gray-600 text-sm mb-4 line-clamp-2">{product.description}</p>
-        
+        <p className="text-gray-600 text-sm mb-4 line-clamp-2">
+          {product.description}
+        </p>
+
         <div className="flex justify-between items-center">
           <div className="flex flex-col">
             <span className="text-farm-green-dark font-semibold">
@@ -76,15 +82,15 @@ const ProductCard = ({ product }: ProductCardProps) => {
               </span>
             )}
           </div>
-          
+
           <div className="flex gap-2">
-            <Link 
+            <Link
               to={`/products/${product.id}`}
               className="text-farm-brown-dark text-sm font-medium hover:underline"
             >
               Details
             </Link>
-            <button 
+            <button
               className="bg-farm-green-dark text-white p-1.5 rounded-md hover:bg-farm-green-light transition-colors"
               aria-label="Add to cart"
               onClick={handleAddToCart}

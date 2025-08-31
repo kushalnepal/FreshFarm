@@ -1076,23 +1076,7 @@ const Admin = () => {
                   </p>
                 </div>
 
-                <h3 className="text-xl font-semibold flex items-center gap-2">
-                  🧠 4. Recommendations
-                </h3>
-
-                <div className="pl-4 space-y-3">
-                  <h4 className="font-medium">
-                    🛍️ Collaborative Filtering (Basic Recommender System)
-                  </h4>
-                  <p className="text-sm text-gray-600">
-                    Recommend products based on: Items commonly bought together
-                    (association rules), Browsing history. Example: If User A
-                    bought chicken and lettuce, and User B bought chicken →
-                    suggest lettuce to User B. Can implement this using: Apriori
-                    algorithm (basic rule mining), Item-based filtering using a
-                    similarity matrix (cosine similarity)
-                  </p>
-                </div>
+                {/* Recommendations section removed */}
 
                 <h3 className="text-xl font-semibold flex items-center gap-2">
                   🔐 5. Security / Auth
